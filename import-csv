@@ -1,0 +1,143 @@
+#!/usr/bin/env python
+
+import os
+import re
+import csv
+import sys
+import decimal
+import argparse
+
+from sqlalchemy import create_engine, MetaData, Text, Integer, Numeric
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.schema import Table, Column
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--url", "-u", help="sqlalchemy url", required=True)
+parser.add_argument("--file", "-f", help="csv file", required=True)
+parser.add_argument("--table", "-t", help="table name", default=None)
+parser.add_argument("--delimiter", help="csv delimiter", default=",")
+parser.add_argument("--integer", "-i", help="integer columns",
+                    action="store_true", default=False)
+parser.add_argument("--mogrify", "-m", help="clean names",
+                    action="store_true", default=True)
+parser.add_argument("--lower", "-l", help="lowercase names",
+                    action="store_true", default=False)
+parser.add_argument("--drop", "-d", help="drop table first",
+                    action="store_true", default=False)
+
+args = parser.parse_args()
+
+# check that our given file exists
+if (not args.file or not os.path.exists(args.file)) and args.file != "-":
+    sys.stderr.write("file '{}' does not exist.\n".format(args.file))
+    sys.exit(1)
+
+# check that we've been given a table name if - was our file
+if args.file == "-" and not args.table:
+    sys.stderr.write("standard input requested, but no table name given.\n")
+    sys.exit(1)
+
+# name cleaner function
+def clean_name(name):
+    name = re.sub(r'[^a-zA-Z0-9_]', "_", name)
+    name = re.sub(r'_+', "_", name)
+    if args.lower:
+        name = name.lower()
+    return name
+
+# construct a table name from the file name
+if args.table is None:
+    path_parts = os.path.split(args.file)
+    file_name = path_parts[1]
+
+    pieces = file_name.split(".")
+    if len(pieces) > 1:
+        pieces = pieces[:-1]
+
+    table_name = ".".join(pieces)
+
+    if args.mogrify:
+        table_name = clean_name(table_name)
+else:
+    table_name = args.table
+
+# hook up with our database
+engine = create_engine(args.url)
+session = sessionmaker(bind=engine)()
+metadata = MetaData()
+
+# get a handle on things
+if args.file == "-":
+    fp = sys.stdin
+else:
+    fp = open(args.file)
+
+# start processing the file
+first = True
+table = None
+header_mapping = {}
+for record in csv.DictReader(fp, delimiter=args.delimiter):
+
+    # on the first iteration, map our headers to new names if requested and
+    # drop and create our table
+    if first:
+        fields = record.keys()
+
+        if args.mogrify:
+            for field in fields:
+                header_mapping[field] = clean_name(field)
+        else:
+            header_mapping = {f:f for f in fields}
+
+        # sort them in the order of our (new?) names
+        fields = sorted(fields, key=lambda k: header_mapping[k])
+
+        # build a table with some hopefully reasonable types
+        columns = []
+        for field in fields:
+            value = record[field]
+
+            # is it a number?
+            try:
+                int(value)
+                if args.integer:
+                    column_type = Integer
+                else:
+                    column_type = Numeric
+            except ValueError:
+                # a number with those dot things?
+                try:
+                    decimal.Decimal(value)
+                    column_type = Numeric
+                except decimal.InvalidOperation:
+                    column_type = Text
+
+            # typed columns (with maybe nice names)
+            column = Column(header_mapping[field], column_type)
+            columns.append(column)
+
+        # construct our table object
+        table = Table(table_name, metadata, *columns)
+
+        # drop on request
+        if args.drop:
+            table.drop(bind=session.bind, checkfirst=True)
+
+        # create. this could fail if you aren't paying attention
+        table.create(bind=session.bind)
+
+        # enough of this boring crap
+        first = False
+
+    # create our insert values
+    if args.mogrify:
+        mapped_record = {header_mapping[f]: v for f, v in record.items()}
+    else:
+        mapped_record = record
+
+    # do the needful
+    session.execute(table.insert(), mapped_record)
+
+# save
+session.commit()
