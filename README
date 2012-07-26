@@ -1,0 +1,5 @@
+Import csv files into your database with less hassle.
+
+Call import-csv with -h for help.
+
+Requires sqlalchemy.
