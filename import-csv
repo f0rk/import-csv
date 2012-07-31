@@ -19,6 +19,8 @@ parser.add_argument("--table", "-t", help="table name", default=None)
 parser.add_argument("--delimiter", help="csv delimiter", default=",")
 parser.add_argument("--integer", "-i", help="integer columns",
                     action="store_true", default=False)
+parser.add_argument("--plain", "-p", help="no format parsing",
+                    action="store_true", default=False)
 parser.add_argument("--mogrify", "-m", help="clean names",
                     action="store_true", default=True)
 parser.add_argument("--lower", "-l", help="lowercase names",
@@ -36,6 +38,12 @@ if (not args.file or not os.path.exists(args.file)) and args.file != "-":
 # check that we've been given a table name if - was our file
 if args.file == "-" and not args.table:
     sys.stderr.write("standard input requested, but no table name given.\n")
+    sys.exit(1)
+
+
+# --integer and --plain conflict
+if args.integer and args.plain:
+    sys.stderr.write("--integer and --plain cannot be combined.\n")
     sys.exit(1)
 
 # name cleaner function
@@ -99,19 +107,22 @@ for record in csv.DictReader(fp, delimiter=args.delimiter):
             value = record[field]
 
             # is it a number?
-            try:
-                int(value)
-                if args.integer:
-                    column_type = Integer
-                else:
-                    column_type = Numeric
-            except ValueError:
-                # a number with those dot things?
+            if not args.plain:
                 try:
-                    decimal.Decimal(value)
-                    column_type = Numeric
-                except decimal.InvalidOperation:
-                    column_type = Text
+                    int(value)
+                    if args.integer:
+                        column_type = Integer
+                    else:
+                        column_type = Numeric
+                except ValueError:
+                    # a number with those dot things?
+                    try:
+                        decimal.Decimal(value)
+                        column_type = Numeric
+                    except decimal.InvalidOperation:
+                        column_type = Text
+            else:
+                column_type = Text
 
             # typed columns (with maybe nice names)
             column = Column(header_mapping[field], column_type)
