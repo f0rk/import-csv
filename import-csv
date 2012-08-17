@@ -9,7 +9,7 @@ import datetime
 import argparse
 
 from sqlalchemy import create_engine, MetaData, Text, Integer, Numeric, \
-                       DateTime
+                       DateTime, BigInteger
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import Table, Column
 
@@ -34,6 +34,8 @@ parser.add_argument("--drop", "-d", help="drop table first",
 parser.add_argument("--empty-nulls", "-e", help="empty fields are null",
                     action="store_true", default=False)
 parser.add_argument("--skip-parsing", "-s", help="skip type parsing for cols")
+parser.add_argument("--big-integer", "-b", help="use bigint instead of int",
+                    default=False, action="store_true")
 
 args = parser.parse_args()
 
@@ -133,7 +135,10 @@ def get_type(value, args):
     if args.integer:
         try:
             int(value)
-            return Integer
+            if args.big_integer:
+                return BigInteger
+            else:
+                return Integer
         except ValueError:
             pass
 
