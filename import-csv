@@ -31,6 +31,8 @@ parser.add_argument("--lower", "-l", help="lowercase names",
                     action="store_true", default=False)
 parser.add_argument("--drop", "-d", help="drop table first",
                     action="store_true", default=False)
+parser.add_argument("--empty-nulls", "-e", help="empty fields are null",
+                    action="store_true", default=False)
 
 args = parser.parse_args()
 
@@ -93,7 +95,6 @@ def get_type(value, args):
         "%Y%m%d",
         "%m/%d/%Y",
         "%b %d, %Y",
-
     ]
 
     time_formats = [
@@ -183,6 +184,10 @@ for record in csv.DictReader(fp, delimiter=args.delimiter):
 
         # enough of this boring crap
         first = False
+
+    # empty fields become None
+    if args.empty_nulls:
+        record = {k: v if v else None for k, v in record.items()}
 
     # create our insert values
     if args.mogrify:
