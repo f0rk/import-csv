@@ -5,9 +5,11 @@ import re
 import csv
 import sys
 import decimal
+import datetime
 import argparse
 
-from sqlalchemy import create_engine, MetaData, Text, Integer, Numeric
+from sqlalchemy import create_engine, MetaData, Text, Integer, Numeric, \
+                       DateTime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import Table, Column
 
@@ -19,7 +21,9 @@ parser.add_argument("--table", "-t", help="table name", default=None)
 parser.add_argument("--delimiter", help="csv delimiter", default=",")
 parser.add_argument("--integer", "-i", help="integer columns",
                     action="store_true", default=False)
-parser.add_argument("--plain", "-p", help="no format parsing",
+parser.add_argument("--numeric", "-n", help="numeric parsing",
+                    action="store_true", default=False)
+parser.add_argument("--timestamp", "-p", help="timestamp parsing",
                     action="store_true", default=False)
 parser.add_argument("--mogrify", "-m", help="clean names",
                     action="store_true", default=True)
@@ -40,18 +44,17 @@ if args.file == "-" and not args.table:
     sys.stderr.write("standard input requested, but no table name given.\n")
     sys.exit(1)
 
-
-# --integer and --plain conflict
-if args.integer and args.plain:
-    sys.stderr.write("--integer and --plain cannot be combined.\n")
-    sys.exit(1)
-
 # name cleaner function
+empties = ""
 def clean_name(name):
+    global empties
     name = re.sub(r'[^a-zA-Z0-9_]', "_", name)
     name = re.sub(r'_+', "_", name)
     if args.lower:
         name = name.lower()
+    if not name:
+        empties += "_"
+        name = empties
     return name
 
 # construct a table name from the file name
@@ -81,6 +84,63 @@ if args.file == "-":
 else:
     fp = open(args.file)
 
+
+# try and figure out the type of the given value
+def get_type(value, args):
+    # date formats will be crossed with time formats
+    date_formats = [
+        "%Y-%m-%d",
+        "%Y%m%d",
+        "%m/%d/%Y",
+        "%b %d, %Y",
+
+    ]
+
+    time_formats = [
+        "%H:%M:%S",
+        "%H:%M:%S %z",
+        "%H:%M:%S %Z",
+        "%I:%M:%S %p",
+        "%I:%M:%S %P",
+    ]
+
+    datetime_formats = []
+    for date_format in date_formats:
+        datetime_formats.append(date_format)
+        for time_format in time_formats:
+            datetime_formats.append(date_format + " " + time_format)
+            datetime_formats.append(date_format + "T" + time_format)
+
+    # first the timestamp
+    if args.timestamp:
+        for timestamp_format in datetime_formats:
+            try:
+                datetime.datetime.strptime(value, timestamp_format)
+                if not (len(value) != 8 and timestamp_format == "%Y%m%d"):
+                    return DateTime
+            except ValueError:
+                pass
+
+    # then integers
+    if args.integer:
+        try:
+            int(value)
+            return Integer
+        except ValueError:
+            pass
+
+    # then numeric
+    if args.numeric:
+        try:
+            decimal.Decimal(value)
+            return Numeric
+        except decimal.InvalidOperation:
+            pass
+    
+    # we got nothing
+    return Text
+
+
 # start processing the file
 first = True
 table = None
@@ -106,25 +166,8 @@ for record in csv.DictReader(fp, delimiter=args.delimiter):
         for field in fields:
             value = record[field]
 
-            # is it a number?
-            if not args.plain:
-                try:
-                    int(value)
-                    if args.integer:
-                        column_type = Integer
-                    else:
-                        column_type = Numeric
-                except ValueError:
-                    # a number with those dot things?
-                    try:
-                        decimal.Decimal(value)
-                        column_type = Numeric
-                    except decimal.InvalidOperation:
-                        column_type = Text
-            else:
-                column_type = Text
-
             # typed columns (with maybe nice names)
+            column_type = get_type(value, args)
             column = Column(header_mapping[field], column_type)
             columns.append(column)
 
