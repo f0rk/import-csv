@@ -33,6 +33,7 @@ parser.add_argument("--drop", "-d", help="drop table first",
                     action="store_true", default=False)
 parser.add_argument("--empty-nulls", "-e", help="empty fields are null",
                     action="store_true", default=False)
+parser.add_argument("--skip-parsing", "-s", help="skip type parsing for cols")
 
 args = parser.parse_args()
 
@@ -74,6 +75,12 @@ if args.table is None:
         table_name = clean_name(table_name)
 else:
     table_name = args.table
+
+# determine any columns we should not type parse
+skip_type_parsing = []
+if args.skip_parsing:
+    cols = args.skip_parsing.split(",")
+    skip_type_parsing = [c.strip() for c in cols]
 
 # hook up with our database
 engine = create_engine(args.url)
@@ -168,7 +175,11 @@ for record in csv.DictReader(fp, delimiter=args.delimiter):
             value = record[field]
 
             # typed columns (with maybe nice names)
-            column_type = get_type(value, args)
+            if field in skip_type_parsing \
+                    or header_mapping[field] in skip_type_parsing:
+                column_type = Text
+            else:
+                column_type = get_type(value, args)
             column = Column(header_mapping[field], column_type)
             columns.append(column)
 
