@@ -157,7 +157,6 @@ def get_type(value, args):
 delimiter = args.delimiter
 if delimiter in ("\\t", "\\\\t"):
     delimiter = "\t"
-print delimiter
 
 # start processing the file
 first = True
