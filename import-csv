@@ -153,12 +153,17 @@ def get_type(value, args):
     # we got nothing
     return Text
 
+# some help to pass tabs
+delimiter = args.delimiter
+if delimiter in ("\\t", "\\\\t"):
+    delimiter = "\t"
+print delimiter
 
 # start processing the file
 first = True
 table = None
 header_mapping = {}
-for record in csv.DictReader(fp, delimiter=args.delimiter):
+for record in csv.DictReader(fp, delimiter=delimiter):
 
     # on the first iteration, map our headers to new names if requested and
     # drop and create our table
