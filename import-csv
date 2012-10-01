@@ -26,12 +26,16 @@ parser.add_argument("--numeric", "-n", help="numeric parsing",
 parser.add_argument("--timestamp", "-p", help="timestamp parsing",
                     action="store_true", default=False)
 parser.add_argument("--mogrify", "-m", help="clean names",
-                    action="store_true", default=True)
+                    action="store_true", default=False)
 parser.add_argument("--lower", "-l", help="lowercase names",
                     action="store_true", default=False)
 parser.add_argument("--drop", "-d", help="drop table first",
                     action="store_true", default=False)
 parser.add_argument("--empty-nulls", "-e", help="empty fields are null",
+                    action="store_true", default=False)
+parser.add_argument("--order", "-o", help="order the columns",
+                    action="store_true", default=False)
+parser.add_argument("--clean-excel", "-c", help="clean retarded excel quoting",
                     action="store_true", default=False)
 parser.add_argument("--skip-parsing", "-s", help="skip type parsing for cols")
 parser.add_argument("--big-integer", "-b", help="use bigint instead of int",
@@ -153,6 +157,13 @@ def get_type(value, args):
     # we got nothing
     return Text
 
+clean_excel_re = re.compile(r'^="(.*)"$')
+def clean_value(key, value):
+    global clean_excel_re
+    if args.clean_excel:
+        value = clean_excel_re.sub('\\1', value)
+    return value
+
 # some help to pass tabs
 delimiter = args.delimiter
 if delimiter in ("\\t", "\\\\t"):
@@ -162,21 +173,26 @@ if delimiter in ("\\t", "\\\\t"):
 first = True
 table = None
 header_mapping = {}
-for record in csv.DictReader(fp, delimiter=delimiter):
+reader = csv.DictReader(fp, delimiter=delimiter)
+for record in reader:
 
     # on the first iteration, map our headers to new names if requested and
     # drop and create our table
     if first:
-        fields = record.keys()
+        fields = reader.fieldnames
 
         if args.mogrify:
             for field in fields:
                 header_mapping[field] = clean_name(field)
         else:
-            header_mapping = {f:f for f in fields}
+            # strip parens to work with less chance of failure. balanced parens
+            # handled incorrectly by psycopg2, unbalanced parens going to break
+            # regardless.
+            header_mapping = {f:f.replace("(", "").replace(")", "") for f in fields}
 
         # sort them in the order of our (new?) names
-        fields = sorted(fields, key=lambda k: header_mapping[k])
+        if args.order:
+            fields = sorted(fields, key=lambda k: header_mapping[k])
 
         # build a table with some hopefully reasonable types
         columns = []
@@ -210,10 +226,7 @@ for record in csv.DictReader(fp, delimiter=delimiter):
         record = {k: v if v else None for k, v in record.items()}
 
     # create our insert values
-    if args.mogrify:
-        mapped_record = {header_mapping[f]: v for f, v in record.items()}
-    else:
-        mapped_record = record
+    mapped_record = {header_mapping[f]: clean_value(f, v) for f, v in record.items()}
 
     # do the needful
     session.execute(table.insert(), mapped_record)
